@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Solar System Visualization</title>
+  <style>
+    body { margin:0; overflow:hidden; font-family:sans-serif; background:#000; color:#fff; }
+    canvas { position:absolute; top:0; left:0; }
+    .menu { position:absolute; background:rgba(255,255,255,0.8); color:#000; padding:8px; border-radius:4px; font-size:14px; }
+    #speed-menu { top:10px; right:10px; width:150px; }
+    #options-menu { top:260px; right:10px; width:150px; }
+    #focus-menu { top:10px; left:10px; width:150px; max-height:80vh; overflow:auto; }
+    button { display:block; width:100%; margin:4px 0; padding:4px 8px; background:#eee; border:none; text-align:left; cursor:pointer; }
+    button.active { background:#ccc; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="speed-menu" class="menu"><strong>Speed</strong></div>
+  <div id="options-menu" class="menu"><strong>Options</strong></div>
+  <div id="focus-menu" class="menu"><strong>Focus</strong></div>
+  <script>
+    // Canvas
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let W = canvas.width = window.innerWidth;
+    let H = canvas.height = window.innerHeight;
+    window.addEventListener('resize', () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; });
+
+    // Constants
+    const AU = 149597870.7;
+    const bodies = [
+      { name:'Sun',     d:0,           r:696342,    T:0,       color:'#ffdd33', sat:[] },
+      { name:'Mercury', d:0.38709893,  r:2439.7,    T:87.97,   color:'#bbb',    sat:[] },
+      { name:'Venus',   d:0.72333199,  r:6051.8,    T:224.70,  color:'#f5deb3', sat:[] },
+      { name:'Earth',   d:1.00000011,  r:6371,      T:365.256, color:'#4a90e2', sat:[
+          {name:'Moon', d:384399/AU, r:1737.4, T:27.3217, color:'#ddd'}
+      ] },
+      { name:'Mars',    d:1.52366231,  r:3389.5,    T:686.98,  color:'#e27c2d', sat:[
+          {name:'Phobos', d:9376/AU, r:11.267, T:0.3189, color:'#888'},
+          {name:'Deimos', d:23458/AU, r:6.2, T:1.263, color:'#aaa'}
+      ] },
+      { name:'Jupiter', d:5.20336301,  r:69911,     T:4332.59, color:'#d4a171', sat:[
+          {name:'Io',       d:421700/AU, r:1821.6, T:1.769, color:'#f0e68c'},
+          {name:'Europa',   d:671100/AU, r:1560.8, T:3.551, color:'#ccc'},
+          {name:'Ganymede', d:1070400/AU, r:2634.1, T:7.155, color:'#ddd'},
+          {name:'Callisto', d:1882700/AU, r:2410.3, T:16.689, color:'#bbb'}
+      ] },
+      { name:'Saturn',  d:9.53707032,  r:58232,     T:10759.22, color:'#f0e68c', sat:[
+          {name:'Titan',    d:1221870/AU, r:2575.5, T:15.945,  color:'#deb887'},
+          {name:'Rhea',     d:527040/AU,  r:764.3,   T:4.518,   color:'#ccc'},
+          {name:'Iapetus',  d:3560800/AU, r:734.5,   T:79.321,  color:'#ddd'},
+          {name:'Dione',    d:377400/AU,  r:561.4,   T:2.737,   color:'#bbb'},
+          {name:'Tethys',   d:294670/AU,  r:533.1,   T:1.888,   color:'#eee'},
+          {name:'Enceladus',d:237950/AU,  r:252.1,   T:1.370,   color:'#aaa'}
+      ] },
+      { name:'Uranus',  d:19.19126393, r:25362,     T:30687.15, color:'#7fdbff', sat:[
+          {name:'Titania',  d:435910/AU,  r:788.9,   T:8.706,   color:'#eee'},
+          {name:'Oberon',   d:583520/AU,  r:761.4,   T:13.463,  color:'#ccc'},
+          {name:'Umbriel',  d:266300/AU,  r:584.7,   T:4.144,   color:'#bbb'},
+          {name:'Ariel',    d:191020/AU,  r:578.9,   T:2.520,   color:'#ddd'},
+          {name:'Miranda',  d:129900/AU,  r:235.8,   T:1.413,   color:'#888'}
+      ] },
+      { name:'Neptune', d:30.06896348, r:24622,     T:60190.03, color:'#3457d5', sat:[
+          {name:'Triton',   d:354759/AU,  r:1353.4,  T:5.877,   color:'#bbb'},
+          {name:'Proteus',  d:117650/AU,  r:210.8,   T:1.122,   color:'#ccc'},
+          {name:'Nereid',   d:5513400/AU, r:170.0,   T:360.136, color:'#ddd'},
+          {name:'Larissa',  d:73548/AU,   r:97.0,    T:0.554,   color:'#eee'}
+      ] }
+    ];
+
+    // State
+    let scale=150, camX=0, camY=0, tracked=null;
+    let timeScale=10, simTime=0, lastTime=performance.now();
+    let showShading=false, showAsteroids=false, showTrails=false;
+
+    // Trails storage
+    const trails = {}, trailCounters={}, trailLen=200;
+
+    // Asteroids
+    const asteroids=[];
+    for(let i=0;i<300;i++) asteroids.push({ a:2.2+Math.random()*(3.2-2.2), ang:Math.random()*2*Math.PI, speed:0.8+Math.random()*0.4 });
+
+    // Compute positions
+    function computePositions(){
+      const pos={};
+      bodies.forEach(b=>{ const ang=b.T?simTime/b.T*2*Math.PI:0; pos[b.name]={x:Math.cos(ang)*b.d,y:Math.sin(ang)*b.d}; });
+      bodies.forEach(b=>{ b.sat.forEach(s=>{ const p0=pos[b.name]; const ang=simTime/s.T*2*Math.PI; pos[s.name]={x:p0.x+Math.cos(ang)*s.d,y:p0.y+Math.sin(ang)*s.d}; }); });
+      return pos;
+    }
+
+    // Menus
+    const speedMenu=document.getElementById('speed-menu');
+    [{label:'1 day/sec',v:1},{label:'1 week/sec',v:7},{label:'1 month/sec',v:30},{label:'1 year/sec',v:365},{label:'1 century/sec',v:36500}]
+      .forEach(opt=>{ const btn=document.createElement('button'); btn.textContent=opt.label; btn.onclick=()=>{timeScale=opt.v; speedMenu.querySelectorAll('button').forEach(x=>x.classList.remove('active')); btn.classList.add('active');}; if(opt.v===timeScale) btn.classList.add('active'); speedMenu.appendChild(btn); });
+    const optMenu=document.getElementById('options-menu');
+    const shadingBtn=document.createElement('button'); shadingBtn.textContent='Day/Night shading'; shadingBtn.onclick=()=>{showShading=!showShading; shadingBtn.classList.toggle('active',showShading);}; optMenu.appendChild(shadingBtn);
+    const astBtn=document.createElement('button'); astBtn.textContent='Asteroid belt'; astBtn.onclick=()=>{showAsteroids=!showAsteroids; astBtn.classList.toggle('active',showAsteroids);}; optMenu.appendChild(astBtn);
+    const trailBtn=document.createElement('button'); trailBtn.textContent='Orbital trails'; trailBtn.onclick=()=>{showTrails=!showTrails; if(!showTrails) Object.keys(trails).forEach(k=>delete trails[k]); trailBtn.classList.toggle('active',showTrails);}; optMenu.appendChild(trailBtn);
+    const focusMenu=document.getElementById('focus-menu');
+    bodies.forEach(b=>{ const btn=document.createElement('button'); btn.textContent=b.name; btn.onclick=()=>{tracked=b; focusMenu.querySelectorAll('button').forEach(x=>x.classList.remove('active')); btn.classList.add('active');}; focusMenu.appendChild(btn); b.sat.forEach(s=>{ const sb=document.createElement('button'); sb.textContent=s.name; sb.style.paddingLeft='16px'; sb.onclick=()=>{tracked=s; focusMenu.querySelectorAll('button').forEach(x=>x.classList.remove('active')); sb.classList.add('active');}; focusMenu.appendChild(sb); }); });
+
+    window.addEventListener('wheel',e=>{e.preventDefault(); scale*=Math.exp(-e.deltaY*0.001);});
+
+    // Animation
+    function loop(){
+      const now=performance.now(), dt=(now-lastTime)/1000; lastTime=now; simTime+=dt*timeScale;
+      const pos=computePositions(); if(tracked){camX=pos[tracked.name].x; camY=pos[tracked.name].y;}
+      ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,W,H);
+      ctx.save(); ctx.translate(W/2,H/2); ctx.scale(scale,scale); ctx.translate(-camX,-camY);
+      // Asteroids
+      if(showAsteroids){ const base=bodies.find(b=>b.name==='Mars').r/AU; const rad=Math.max(base,1/scale); ctx.fillStyle='#fff'; asteroids.forEach(a=>{ const x=a.a*Math.cos(a.ang+simTime*0.001*a.speed), y=a.a*Math.sin(a.ang+simTime*0.001*a.speed); ctx.beginPath(); ctx.arc(x,y,rad,0,2*Math.PI); ctx.fill(); }); }
+      // Orbits
+      ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.lineWidth=0.5/scale;
+      bodies.forEach(b=>{ if(b.d){ctx.beginPath();ctx.arc(0,0,b.d,0,2*Math.PI);ctx.stroke();} b.sat.forEach(s=>{ const p0=pos[b.name]; ctx.beginPath();ctx.arc(p0.x,p0.y,s.d,0,2*Math.PI);ctx.stroke(); }); });
+      // Bodies & trails
+      bodies.forEach(b=>{
+        const p=pos[b.name];
+        if(showTrails){ if(!(b.name in trails)) {trails[b.name]=[]; trailCounters[b.name]=0;} const pts=trails[b.name]; const c=trailCounters[b.name]++; pts.push({x:p.x,y:p.y, mark:(c%10)===0}); if(pts.length>trailLen)pts.shift(); pts.forEach((pt,i)=>{ const t=(i+1)/pts.length; let alpha=t; if(pt.mark) alpha*=0.5; ctx.globalAlpha=alpha; const r=(b.r/AU)*(0.3+0.7*t); ctx.fillStyle=b.color; ctx.beginPath();ctx.arc(pt.x,pt.y,r,0,2*Math.PI);ctx.fill(); if(i>0){ const prev=pts[i-1]; ctx.strokeStyle=b.color; ctx.lineWidth=r*2; ctx.beginPath();ctx.moveTo(prev.x,prev.y);ctx.lineTo(pt.x,pt.y);ctx.stroke();}}); ctx.globalAlpha=1; }
+        ctx.fillStyle=b.color;ctx.beginPath();ctx.arc(p.x,p.y,b.r/AU,0,2*Math.PI);ctx.fill();
+        if(showShading&&b.d){ const sa=Math.atan2(-p.y,-p.x);ctx.fillStyle='rgba(0,0,0,0.4)';ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.arc(p.x,p.y,b.r/AU,sa+Math.PI/2,sa-Math.PI/2);ctx.closePath();ctx.fill();}
+        b.sat.forEach(s=>{
+          const sp=pos[s.name];
+          if(showTrails){ if(!(s.name in trails)){trails[s.name]=[]; trailCounters[s.name]=0;} const pts=trails[s.name]; const c=trailCounters[s.name]++; pts.push({x:sp.x,y:sp.y,mark:(c%10)===0}); if(pts.length>trailLen)pts.shift(); pts.forEach((pt,i)=>{ const t=(i+1)/pts.length; let alpha=t; if(pt.mark) alpha*=0.5; ctx.globalAlpha=alpha; const r=(s.r/AU)*(0.3+0.7*t); ctx.fillStyle=s.color; ctx.beginPath();ctx.arc(pt.x,pt.y,r,0,2*Math.PI);ctx.fill(); if(i>0){ const prev=pts[i-1]; ctx.strokeStyle=s.color; ctx.lineWidth=r*2; ctx.beginPath();ctx.moveTo(prev.x,prev.y);ctx.lineTo(pt.x,pt.y);ctx.stroke();}}); ctx.globalAlpha=1; }
+          ctx.fillStyle=s.color;ctx.beginPath();ctx.arc(sp.x,sp.y,s.r/AU,0,2*Math.PI);ctx.fill(); if(showShading){ const sa2=Math.atan2(-sp.y,-sp.x);ctx.fillStyle='rgba(0,0,0,0.4)';ctx.beginPath();ctx.moveTo(sp.x,sp.y);ctx.arc(sp.x,sp.y,s.r/AU,sa2+Math.PI/2,sa2-Math.PI/2);ctx.closePath();ctx.fill();}
+        });
+      });
+      ctx.restore();
+      // Labels
+      ctx.fillStyle = '#fff';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      const satsMap = {};
+      bodies.forEach(b => { if (b.sat.length) satsMap[b.name] = b.sat.map(s => s.name); });
+      const suppressed = {};
+      const th = 30;
+      for (const pl in satsMap) {
+        const pp = pos[pl];
+        const sx = (pp.x - camX) * scale + W/2;
+        const sy = (pp.y - camY) * scale + H/2;
+        suppressed[pl] = satsMap[pl].some(sn => {
+          const sp = pos[sn];
+          const ssx = (sp.x - camX) * scale + W/2;
+          const ssy = (sp.y - camY) * scale + H/2;
+          return Math.hypot(ssx - sx, ssy - sy) < th;
+        });
+      }
+      bodies.forEach(b => {
+        const pp = pos[b.name];
+        const sx = (pp.x - camX) * scale + W/2;
+        const sy = (pp.y - camY) * scale + H/2;
+        const sats = satsMap[b.name] || [];
+        if (sats.length && suppressed[b.name]) {
+          ctx.fillText(`${b.name} + ${sats.length}`, sx, sy - 5);
+        } else {
+          ctx.fillText(b.name, sx, sy - 5);
+          sats.forEach(sn => {
+            const sp = pos[sn];
+            const ssx = (sp.x - camX) * scale + W/2;
+            const ssy = (sp.y - camY) * scale + H/2;
+            ctx.fillText(sn, ssx, ssy - 5);
+          });
+        }
+      });
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
