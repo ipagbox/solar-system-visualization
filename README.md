@@ -1,5 +1,7 @@
 # Solar System Visualization
 
+DEMO: https://ipagbox.github.io/solar-system-visualization/
+
 A simplified, interactive model of our Solar System built with HTML5 Canvas and JavaScript. This demo preserves approximate **relative scales** of:
 
 - **Planet sizes** (radius in km)  
